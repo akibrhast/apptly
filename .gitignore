@@ -1,0 +1,33 @@
+# macOS / editor noise
+.DS_Store
+*.swp
+*.swo
+*~
+
+# Python caches and local environments
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+env/
+
+# Matplotlib local cache
+.matplotlib/
+
+# Raw and derived capture data
+*.dat
+*.npy
+*.npz
+derived_data/
+
+# Generated analysis outputs
+outputs/
+
+# Local logs / scratch
+*.log
+tmp/
+scratch/
