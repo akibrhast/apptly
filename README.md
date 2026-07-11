@@ -12,6 +12,7 @@ This project analyzes `iis3dwb_acc.dat`, a raw binary IIS3DWB accelerometer capt
 - `src/fifo_boundary_diagnostics.py` - firmware-aware near-clipping checks against FIFO and SD block offsets.
 - `src/burst_timing_diagnostics.py` - compares widening RMS bursts against near-clip event timing.
 - `src/create_cleaned_data.py` - creates derived cleaned/winsorized `.dat` files without modifying the original.
+- `src/compare_data_versions.py` - compares raw, winsorized, and cleaned data versions side by side.
 - `derived_data/` - derived data files and contamination metadata.
 - `outputs/` - generated reports and images.
 - `.venv/` - local Python environment.
@@ -100,3 +101,19 @@ The original `iis3dwb_acc.dat` is not modified. Outputs are written to `derived_
 - `iis3dwb_acc_cleaning_metadata.json` records thresholds, row counts, and output paths.
 
 For time-aligned plots, prefer the winsorized file. For statistics where dropping contaminated rows is acceptable, use the cleaned-removed file and metadata.
+
+## Raw vs Cleaned Comparison
+
+Generate a side-by-side report comparing the raw, winsorized, and cleaned-removed data files:
+
+```bash
+python src/compare_data_versions.py
+```
+
+The outputs are written to:
+
+- `outputs/data_version_comparison.png`
+- `outputs/data_version_comparison_summary.csv`
+- `outputs/data_version_comparison_report.md`
+
+Use this report to check which vibration features survive outlier suppression and which features are likely artifact-driven.
