@@ -15,7 +15,7 @@ from matplotlib.ticker import FuncFormatter
 from matplotlib.widgets import Button
 import numpy as np
 
-from iis3dwb_data import DEFAULT_SAMPLE_RATE_HZ, SENSITIVITY_MG_PER_LSB, load_dataset
+from iis3dwb_data import DEFAULT_OFFSET_BYTES, DEFAULT_SAMPLE_RATE_HZ, SENSITIVITY_MG_PER_LSB, load_dataset
 
 
 AXES = ("X", "Y", "Z")
@@ -906,7 +906,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Interactive matplotlib browser for IIS3DWB vibration analysis.")
     parser.add_argument("--input", type=Path, default=Path("iis3dwb_acc.dat"))
     parser.add_argument("--sample-rate-hz", type=float, default=DEFAULT_SAMPLE_RATE_HZ)
-    parser.add_argument("--offset-bytes", type=int, default=4)
+    parser.add_argument("--offset-bytes", type=int, default=DEFAULT_OFFSET_BYTES)
     parser.add_argument("--full-scale-g", type=int, choices=(2, 4, 8, 16))
     parser.add_argument(
         "--target-points",

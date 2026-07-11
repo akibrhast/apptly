@@ -12,7 +12,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from iis3dwb_data import DEFAULT_SAMPLE_RATE_HZ, load_dataset
+from iis3dwb_data import DEFAULT_OFFSET_BYTES, DEFAULT_SAMPLE_RATE_HZ, load_dataset
 from window_artifact_diagnostics import rolling_dynamic_rms
 
 
@@ -100,7 +100,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Diagnose whether widening RMS bursts follow near-clip event timing.")
     parser.add_argument("--input", type=Path, default=Path("iis3dwb_acc.dat"))
     parser.add_argument("--sample-rate-hz", type=float, default=DEFAULT_SAMPLE_RATE_HZ)
-    parser.add_argument("--offset-bytes", type=int, default=4)
+    parser.add_argument("--offset-bytes", type=int, default=DEFAULT_OFFSET_BYTES)
     parser.add_argument("--near-clip-threshold", type=int, default=30000)
     parser.add_argument("--winsorize-threshold", type=int, default=10000)
     parser.add_argument("--rms-window-seconds", type=float, default=5.0)

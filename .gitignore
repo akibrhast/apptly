@@ -17,6 +17,7 @@ env/
 
 # Matplotlib local cache
 .matplotlib/
+.mplconfig/
 
 # Raw capture data
 *.dat
@@ -28,6 +29,7 @@ env/
 !derived_data/**
 !outputs/
 !outputs/**
+outputs/.DS_Store
 
 # Local logs / scratch
 *.log

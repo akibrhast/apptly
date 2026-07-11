@@ -1,0 +1,19 @@
+{
+  "input": "iis3dwb_acc.dat",
+  "output": "derived_data/iis3dwb_acc_decoded_xyz.dat",
+  "sample_rate_hz": 26667.0,
+  "samples": 82382714,
+  "duration_minutes": 51.48855264309196,
+  "sd_item_bytes": 48128,
+  "sd_item_header_bytes": 4,
+  "sd_items_decoded": 10285,
+  "samples_per_timestamp": 1000,
+  "timestamp_bytes": 8,
+  "timestamp_records_removed": 82382,
+  "trailing_bytes_ignored": 0,
+  "decoded_file_is_pure_int16_xyz": true,
+  "max_abs_count": 32764,
+  "rows_abs_ge_10000": 779,
+  "rows_abs_ge_30000": 150,
+  "raw_count_vector_rms": 1390.2205124409072
+}

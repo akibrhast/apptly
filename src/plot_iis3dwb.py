@@ -9,7 +9,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-from iis3dwb_data import DEFAULT_SAMPLE_RATE_HZ, counts_to_g, load_dataset
+from iis3dwb_data import DEFAULT_OFFSET_BYTES, DEFAULT_SAMPLE_RATE_HZ, counts_to_g, load_dataset
 
 
 AXES = ("X", "Y", "Z")
@@ -92,7 +92,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Plot IIS3DWB raw accelerometer data.")
     parser.add_argument("--input", type=Path, default=Path("iis3dwb_acc.dat"))
     parser.add_argument("--sample-rate-hz", type=float, default=DEFAULT_SAMPLE_RATE_HZ)
-    parser.add_argument("--offset-bytes", type=int, default=4)
+    parser.add_argument("--offset-bytes", type=int, default=DEFAULT_OFFSET_BYTES)
     parser.add_argument("--full-scale-g", type=int, choices=(2, 4, 8, 16))
     parser.add_argument("--spectrogram-axis", choices=AXES, default="X")
     parser.add_argument("--output-dir", type=Path, default=Path("outputs"))

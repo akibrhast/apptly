@@ -4,22 +4,48 @@ Date: 2026-07-11
 
 ## Scope
 
-This report summarizes the investigation of `iis3dwb_acc.dat`, a 51.56 minute IIS3DWB accelerometer capture. The goal was to understand whether the observed rolling RMS burst pattern, including increasing burst spacing over time, represents real vibration or a data acquisition/storage artifact.
+This report summarizes the investigation of `iis3dwb_acc.dat`, a DATALOG2 IIS3DWB accelerometer capture. The goal was to understand whether the observed rolling RMS burst pattern, including increasing burst spacing over time, represents real vibration or a data acquisition/storage artifact.
 
-The current working conclusion is that the raw rolling RMS pattern is dominated by corrupt/outlier samples, not physical vibration. The strongest supporting observation is that the same widening pattern was reported when the sensor was not connected to anything.
+The current confirmed conclusion is that the original file was initially misparsed as a pure `int16 XYZ` stream. The `.dat` file contains DATALOG2 framing metadata: repeated SD buffer byte counters and repeated timestamp records. When those metadata bytes are interpreted as accelerometer samples, they create the high-amplitude outlier population that drives the widening rolling RMS pattern.
+
+The strongest supporting observations are:
+
+- firmware code explicitly writes the metadata records into the stream
+- the high-amplitude samples line up with those metadata byte positions
+- after decoding the DATALOG2 framing, the large widening RMS envelope disappears
+- a similar pattern was reported when the sensor was not connected to anything
 
 ## Data And Parser Assumptions
 
-The dataset is currently parsed as:
+The initial parser assumption was:
 
 - file: `iis3dwb_acc.dat`
 - sample rate: `26667 Hz`
-- leading offset/header: `4 bytes`
 - data type: little-endian signed `int16`
 - sample layout: interleaved `X, Y, Z`
 - full-scale setting from firmware: `16g`
-- original sample rows: `82,499,412`
-- duration: `51.561488 minutes`
+- leading offset/header: `4 bytes`
+- sample rows under this incorrect parse: `82,499,412`
+- duration under this incorrect parse: `51.561488 minutes`
+
+That assumption is now known to be incomplete.
+
+The confirmed DATALOG2 framing is:
+
+- each SD circular-buffer item is `48128 bytes`
+- each item starts with a `4-byte byte_counter`
+- the remaining `48124 bytes` are stream payload
+- inside the payload, every `1000` XYZ samples are followed by an `8-byte timestamp`
+- one XYZ sample is `6 bytes`: `X/Y/Z int16`
+
+The corrected decoded stream is:
+
+- decoded file: `derived_data/iis3dwb_acc_decoded_xyz.dat`
+- decoded sample rows: `82,382,714`
+- decoded duration: `51.488553 minutes`
+- removed SD item headers: `10,285`
+- removed timestamp records: `82,382`
+- decoded output format: pure little-endian `int16 X/Y/Z`, no leading offset
 
 The parser and constants are in `src/iis3dwb_data.py`.
 
@@ -92,14 +118,23 @@ Important code findings:
 - The model sets full-scale to `16g`.
 - The data format is `int16`.
 - The firmware ODR is `26667 Hz`, not `26700 Hz`.
+- `iis3dwb_acc_set_samples_per_ts(1000, NULL)` enables one timestamp record per `1000` samples.
 - IIS3DWB FIFO records are read as `7 bytes/sample`: `tag + X + Y + Z`.
 - The firmware then strips the 1-byte FIFO tag and compacts data into `6 bytes/sample`: `X/Y/Z int16`.
-- The SD write layer writes stream bytes directly to `.dat` through FileX.
+- The DatalogAppTask stream layer writes `8` timestamp bytes into the FileX stream whenever the `samples_per_ts` counter is reached.
+- The FileX circular buffer packs stream bytes into fixed-size SD items and writes a `4-byte byte_counter` at the start of each item.
+- The SD write layer writes those framed stream bytes directly to `.dat` through FileX.
 
 Relevant firmware path details:
 
 - IIS3DWB FIFO read and tag removal:
   `/Users/arahman/Documents/fp-sns-datalog2/Projects/eLooM_Components/SensorManager/Src/IIS3DWBTask.c`
+- IIS3DWB `samples_per_ts = 1000`:
+  `/Users/arahman/Documents/fp-sns-datalog2/Projects/STM32L4R9ZI-STWIN/Applications/DATALOG2/PnPL/AppModel/Src/App_model_Iis3dwb_Acc.c`
+- Timestamp insertion into USB/FileX stream:
+  `/Users/arahman/Documents/fp-sns-datalog2/Projects/STM32L4R9ZI-STWIN/Applications/DATALOG2/Core/Src/DatalogAppTask.c`
+- DATALOG2 circular-buffer item header:
+  `/Users/arahman/Documents/fp-sns-datalog2/Middlewares/ST/CircularBufferDL2/CircularBufferDL2.c`
 - SD data write:
   `/Users/arahman/Documents/fp-sns-datalog2/Projects/STM32L4R9ZI-STWIN/Applications/DATALOG2/FileX/App/filex_dctrl_class.c`
 - SD chunk size calculation:
@@ -141,7 +176,7 @@ Purpose:
 - if peaks move when window start shifts, suspect window-boundary artifact
 - if spacing changes with window size, suspect beat/alias artifact
 - if peaks stay at absolute timestamps, actual captured events exist
-- if pattern disappears after removing or suppressing outliers, RMS is dominated by corrupt samples
+- if pattern disappears after removing or suppressing outliers, RMS is dominated by non-signal high-amplitude samples
 
 Observation:
 
@@ -176,9 +211,74 @@ The near-clipped samples are not randomly distributed. They concentrate at byte 
 - 1536-byte compact IIS3DWB payload boundaries
 - 256-sample FIFO group positions
 
-Real vibration should not care about byte position inside a file. Storage, DMA, FIFO packing, and buffer handling can.
+Real vibration should not care about byte position inside a file. This made the initial RMS pattern look like a storage, DMA, FIFO packing, or buffer-handling artifact.
 
-This diagnostic explains where corruption tends to land in the stream.
+This diagnostic was the clue that the apparent high-amplitude samples were tied to file framing, not physical vibration.
+
+## DATALOG2 Framing Confirmation
+
+The boundary diagnostic originally pointed toward 512-byte and SD-buffer alignment. Later firmware inspection clarified that these were not arbitrary corruption sites; they were DATALOG2 framing positions.
+
+Two metadata layers were confirmed:
+
+1. SD item header:
+
+```text
+48128-byte SD item =
+  4-byte byte_counter
+  48124-byte stream payload
+```
+
+2. Timestamp records inside the payload:
+
+```text
+6008-byte payload frame =
+  6000 bytes of samples = 1000 XYZ samples * 6 bytes/sample
+  8-byte timestamp
+```
+
+This explains the earlier outlier findings:
+
+- high-amplitude events were strongly concentrated at byte offset `0 mod 48128` before SD headers were removed
+- after removing SD headers, the remaining high-amplitude events concentrated at byte offsets `6000`, `6002`, `6004`, and `6006 mod 6008`
+- those offsets are exactly the four `int16` words that make up an 8-byte timestamp when misread as accelerometer samples
+
+So the large outlier population was mostly metadata interpreted as `int16 XYZ`, not physical sensor output and not random SD corruption.
+
+A decoder was added:
+
+- script: `src/create_decoded_datalog2_data.py`
+- decoded output: `derived_data/iis3dwb_acc_decoded_xyz.dat`
+- metadata: `derived_data/iis3dwb_acc_decoded_metadata.json`
+
+Decoder summary:
+
+```text
+raw_file_bytes=494996480
+sd_item_bytes=48128
+sd_item_header_bytes=4
+sd_items_decoded=10285
+samples_per_timestamp=1000
+timestamp_bytes=8
+timestamp_records_removed=82382
+decoded_samples=82382714
+decoded_duration_minutes=51.488553
+```
+
+Outlier collapse after correct decoding:
+
+```text
+naive_parse_rows_abs_ge_10000=160963
+decoded_rows_abs_ge_10000=779
+
+naive_parse_rows_abs_ge_30000=20929
+decoded_rows_abs_ge_30000=150
+
+naive_parse_vector_rms_counts≈2450
+decoded_vector_rms_counts=1390.220512
+```
+
+This is the strongest confirmation in the investigation. The RMS burst artifact was primarily caused by parsing DATALOG2 metadata as vibration data.
 
 ## Burst Timing Diagnostic
 
@@ -201,21 +301,21 @@ raw_rms_peak_gap_minutes_first=0.050000
 raw_rms_peak_gap_minutes_last=0.883333
 ```
 
-Interpretation:
+Interpretation at that stage:
 
 The raw RMS envelope rises when near-clipped sample count rises. After removing the near-clipped rows, the relationship disappears and even flips sign.
 
-This suggests:
+This suggested:
 
-- the raw RMS bursts are driven by corrupt/outlier samples
-- the increasing apparent burst spacing is mainly changing timing/count of those corrupt samples
+- the raw RMS bursts were driven by high-amplitude non-signal samples
+- the increasing apparent burst spacing was mainly changing timing/count of those samples
 - the widening pattern is not reliable evidence of changing physical vibration
 
-This diagnostic explains when enough corruption accumulates to make the rolling RMS spike.
+The later DATALOG2 framing confirmation explains what those samples were: SD byte-counter and timestamp metadata decoded as `int16 XYZ`.
 
 ## Cleaned And Winsorized Data
 
-A script was created to derive cleaned data files while preserving the original raw file:
+A script was created before the framing issue was fully understood to derive cleaned data files while preserving the original raw file:
 
 - script: `src/create_cleaned_data.py`
 - metadata: `derived_data/iis3dwb_acc_cleaning_metadata.json`
@@ -248,6 +348,8 @@ Definitions:
 
 The original file is not modified.
 
+These files are now best understood as diagnostic artifacts. They showed that suppressing high-amplitude values removed the rolling RMS envelope, but they did not solve the root issue. The root issue was that DATALOG2 metadata bytes were being parsed as samples.
+
 ## Important Later Observation
 
 When the interactive browser was run on:
@@ -266,7 +368,7 @@ python src/interactive_analysis_browser.py --input derived_data/iis3dwb_acc_clea
 
 the pattern was still visible.
 
-This was an important refinement. It showed that the pattern is not only caused by the most obvious near-clipping samples above `30000`. It is also driven by a larger population of high-amplitude outliers below clipping.
+This was an important refinement at the time. It showed that the pattern was not only caused by the most obvious near-clipping samples above `30000`; it was also driven by a larger population of high-amplitude values below clipping.
 
 Counts by threshold in the original file:
 
@@ -278,63 +380,58 @@ abs(sample) >= 25000: 53832 contaminated rows, 0.065251%
 abs(sample) >= 30000: 20929 contaminated rows, 0.025369%
 ```
 
-This explains why removing only `>=30000` rows was insufficient. Winsorizing at `+/-10000` suppresses a much broader outlier population.
+The later DATALOG2 decoder explains why removing only `>=30000` rows was insufficient: timestamp bytes and SD byte-counter bytes can decode into many different signed `int16` amplitudes, not only full-scale clips. Winsorizing at `+/-10000` suppressed that broad metadata-derived population, but proper decoding removes the metadata instead.
 
 ## Current Understanding
 
 The current understanding is:
 
-1. The raw `.dat` file contains a real IIS3DWB accelerometer stream, but it is contaminated by sparse high-amplitude outliers.
-2. The most extreme outliers appear as near-clipped values around `+/-30000` to `+/-32768`.
-3. A larger outlier population exists between `10000` and `30000` raw counts.
-4. These outliers are strong enough to dominate rolling RMS.
-5. The outliers show boundary correlations with 512-byte SD sectors and 1536-byte IIS3DWB payload structure.
-6. The increasing RMS burst spacing is mostly a visualization of changing outlier timing/count, not a reliable vibration trend.
-7. The observation that the same pattern appears with an unconnected sensor strongly supports a logger/storage/firmware artifact.
+1. The original `.dat` file contains a valid DATALOG2 IIS3DWB stream, not a pure sample-only binary stream.
+2. The first analysis incorrectly treated DATALOG2 metadata as accelerometer samples.
+3. The apparent high-amplitude outlier population was mostly made of SD byte-counter headers and timestamp bytes.
+4. These metadata bytes were strong enough to dominate rolling RMS.
+5. The increasing RMS burst spacing was a parser/framing artifact, not reliable evidence of changing physical vibration.
+6. After removing DATALOG2 framing, the decoded quartile dynamic RMS is stable:
+
+```text
+Q1 vector RMS=1404.08396 counts
+Q2 vector RMS=1407.26991 counts
+Q3 vector RMS=1407.24249 counts
+Q4 vector RMS=1399.53798 counts
+```
+
+7. The decoded first half vs second half dynamic RMS is also stable:
+
+```text
+first_half_vector_rms=1405.67786 counts
+second_half_vector_rms=1403.39568 counts
+```
+
+8. The observation that the same widening pattern appears with an unconnected sensor is consistent with a parser/framing artifact.
 
 ## Current Working Hypotheses
 
-The most likely artifact mechanisms are:
+The primary hypothesis is now confirmed:
 
-### Partial Byte Corruption
+### Confirmed: DATALOG2 Metadata Was Parsed As Sample Data
 
-Each axis sample is a signed 16-bit value. If one byte is stale, shifted, or overwritten, the decoded value can become very large without necessarily reaching full-scale clipping.
+The file contains repeated metadata records that must be removed before interpreting the stream as `int16 XYZ` samples:
 
-This could explain the `10000-30000` outliers.
+- `4-byte byte_counter` at the start of each `48128-byte` SD item
+- `8-byte timestamp` after each `1000` XYZ samples
 
-### FIFO Tag Or Packing Error
+When these bytes are interpreted as signed accelerometer counts, they naturally create values across the `10000-30000` range and sometimes near full-scale. The rolling RMS formula then amplifies those sparse large values into visible bursts.
 
-The IIS3DWB FIFO data starts as `7 bytes/sample`:
+### Residual High-Amplitude Samples
 
-```text
-tag + X_L X_H + Y_L Y_H + Z_L Z_H
-```
-
-The firmware compacts this to:
+After correct decoding, a small number of high-amplitude samples remain:
 
 ```text
-X_L X_H + Y_L Y_H + Z_L Z_H
+decoded_rows_abs_ge_10000=779
+decoded_rows_abs_ge_30000=150
 ```
 
-If tag stripping or in-place compaction is occasionally off, stale, or interrupted, false high-amplitude `int16` values can appear.
-
-### SD DMA Or Cache Coherency Issue
-
-The SD path uses DMA writes. If buffer ownership or cache coherency is imperfect, the SD card may receive partially stale data.
-
-This would naturally create boundary-correlated corruption and a range of amplitudes, not only full-scale clips.
-
-### SD Card Latency Or Queue Pressure
-
-A 120 GB SD card may have variable internal write latency. If the card stalls or the FileX/SD write task falls behind, sensor buffers may pile up or be reused under pressure.
-
-This could explain why corruption timing changes over the 51-minute run.
-
-### FileX/FAT Allocation Or Sector Boundary Effects
-
-The firmware writes 512-byte sector-oriented chunks. The strongest diagnostic signal appears at byte offset `0` modulo `512`.
-
-This does not prove FileX itself is corrupting data, but it strongly suggests the artifact is coupled to the storage/write boundary.
+Those residual samples may be real transient sensor values, startup/shutdown effects, remaining framing edge cases, or true rare corruption. They are now small enough that they do not explain the original widening RMS pattern.
 
 ## What Seems Less Likely Now
 
@@ -344,41 +441,44 @@ The following explanations are now less likely:
 - rotating equipment gradually changing speed
 - normal sensor noise
 - purely mathematical rolling-window artifact without real outlier events
-- a single wrong parser setting for the whole file
+- random SD corruption as the main explanation
+- FIFO tag stripping as the main explanation
+- SD DMA/cache coherency as the main explanation
 
-A parser issue would usually create continuous misinterpretation, not sparse high-amplitude events concentrated at storage/FIFO boundaries.
+The file still needs correct parsing, but the problem is no longer an unknown parser setting. The relevant format details have been identified in the firmware and confirmed against the data.
 
 ## Practical Analysis Guidance
 
-Use the original raw file for forensic diagnostics only.
+Use the decoded pure XYZ file for normal vibration analysis:
 
-Use the winsorized file for time-aligned visualization:
+```bash
+python src/interactive_analysis_browser.py --input derived_data/iis3dwb_acc_decoded_xyz.dat
+```
+
+The loader can also auto-detect and decode the original DATALOG2 file:
+
+```bash
+python src/interactive_analysis_browser.py --input iis3dwb_acc.dat
+```
+
+Use the original raw file directly only if the script uses the updated `src/iis3dwb_data.py` loader. Older scripts or external tools that assume pure XYZ will recreate the false RMS bursts.
+
+The winsorized and cleaned-removed files are retained as diagnostic artifacts:
 
 ```bash
 python src/interactive_analysis_browser.py --input derived_data/iis3dwb_acc_winsorized.dat
-```
-
-Use the cleaned-removed file for statistics where dropping contaminated rows is acceptable:
-
-```bash
 python src/interactive_analysis_browser.py --input derived_data/iis3dwb_acc_cleaned_removed.dat
 ```
 
-However, note that `cleaned_removed` with threshold `30000` still leaves many `10000-30000` outliers. For stricter row removal:
-
-```bash
-python src/create_cleaned_data.py --near-clip-threshold 10000 --output-dir derived_data_t10000
-```
-
-For most time-based plots, the winsorized file is currently the better practical choice because it preserves the original timebase and suppresses the outlier-driven RMS envelope.
+They are no longer preferred for primary analysis because they suppress symptoms instead of decoding the actual file format.
 
 ## Current Summary
 
-The dataset should not be interpreted using raw rolling RMS alone.
+The dataset should not be interpreted by treating the original `.dat` bytes as a pure `int16 XYZ` stream.
 
-The current best interpretation is:
+The current confirmed interpretation is:
 
-> The observed increasing periodic RMS gaps are primarily caused by sparse, boundary-correlated high-amplitude outliers in the captured data stream. The 512-byte/SD alignment explains where corruption tends to appear, and the burst timing diagnostic shows that the visible raw RMS envelope follows the changing timing/count of those outliers. Since a similar pattern appears with an unconnected sensor, the artifact is likely in acquisition, buffering, packing, DMA, FileX, SD card behavior, or their interaction, rather than in physical vibration.
+> The observed increasing periodic RMS gaps are primarily caused by DATALOG2 metadata bytes being interpreted as accelerometer samples. The 512-byte/SD alignment and `48128`-byte FileX buffer alignment identify the repeated byte-counter headers. After those headers are removed, the remaining large samples align with the 8-byte timestamp records inserted every `1000` samples. Once both metadata layers are removed, the quartile and half-duration RMS values are stable, so the widening RMS pattern should not be treated as physical vibration.
 
 ## Generated Artifacts
 
@@ -392,9 +492,16 @@ Main scripts:
 - `src/fifo_boundary_diagnostics.py`
 - `src/burst_timing_diagnostics.py`
 - `src/create_cleaned_data.py`
+- `src/create_decoded_datalog2_data.py`
 
 Main outputs:
 
+- `derived_data/iis3dwb_acc_decoded_xyz.dat`
+- `derived_data/iis3dwb_acc_decoded_metadata.json`
+- `outputs/decoded_analysis_summary.csv`
+- `outputs/decoded_window_artifact_diagnostics.png`
+- `outputs/decoded_rolling_metrics.csv`
+- `outputs/decoded_plots/`
 - `outputs/window_artifact_diagnostics.png`
 - `outputs/fifo_boundary_diagnostics.png`
 - `outputs/fifo_boundary_summary.txt`
@@ -404,4 +511,3 @@ Main outputs:
 - `derived_data/iis3dwb_acc_cleaned_removed.dat`
 - `derived_data/iis3dwb_acc_contamination_mask.npy`
 - `derived_data/iis3dwb_acc_cleaning_metadata.json`
-
