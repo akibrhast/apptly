@@ -13,6 +13,7 @@ This project analyzes `iis3dwb_acc.dat`, a raw binary IIS3DWB accelerometer capt
 - `src/burst_timing_diagnostics.py` - compares widening RMS bursts against near-clip event timing.
 - `src/create_cleaned_data.py` - creates derived cleaned/winsorized `.dat` files without modifying the original.
 - `src/compare_data_versions.py` - compares raw, winsorized, and cleaned data versions side by side.
+- `src/create_outlier_rms_plotly_demo.py` - creates an interactive Plotly concept demo for outlier-driven RMS widening.
 - `derived_data/` - derived data files and contamination metadata.
 - `outputs/` - generated reports and images.
 - `.venv/` - local Python environment.
@@ -117,3 +118,13 @@ The outputs are written to:
 - `outputs/data_version_comparison_report.md`
 
 Use this report to check which vibration features survive outlier suppression and which features are likely artifact-driven.
+
+## Outlier RMS Concept Demo
+
+Generate a standalone interactive Plotly HTML demo:
+
+```bash
+python src/create_outlier_rms_plotly_demo.py
+```
+
+Open `outputs/outlier_population_rms_plotly_demo.html` in a browser. The page has a formula, slider, and play button that show how increasing a sparse high-amplitude outlier population can create widening rolling-RMS peaks even when the baseline vibration is unchanged. The page loads Plotly from the public Plotly CDN.

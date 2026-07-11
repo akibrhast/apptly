@@ -1,0 +1,356 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+
+HTML = """<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Outlier Population Effect on Rolling RMS</title>
+  <script src="https://cdn.plot.ly/plotly-2.35.2.min.js"></script>
+  <style>
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #111827;
+      background: #f8fafc;
+    }
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 26px;
+      letter-spacing: 0;
+    }
+    .subtitle {
+      margin: 0 0 18px;
+      color: #475569;
+      line-height: 1.45;
+    }
+    .panel {
+      background: white;
+      border: 1px solid #dbe3ef;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    }
+    .formula {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      background: #f1f5f9;
+      border: 1px solid #dbe3ef;
+      border-radius: 6px;
+      padding: 12px;
+      overflow-x: auto;
+      line-height: 1.55;
+    }
+    .controls {
+      display: grid;
+      grid-template-columns: auto 1fr auto auto;
+      gap: 12px;
+      align-items: center;
+    }
+    input[type="range"] {
+      width: 100%;
+      accent-color: #7c3aed;
+    }
+    button {
+      border: 1px solid #94a3b8;
+      background: #fff;
+      color: #111827;
+      border-radius: 6px;
+      padding: 8px 12px;
+      cursor: pointer;
+      font-weight: 600;
+    }
+    button:hover {
+      background: #f1f5f9;
+    }
+    #populationValue {
+      min-width: 58px;
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+      font-weight: 700;
+    }
+    #stats {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-top: 12px;
+    }
+    .stat {
+      background: #f8fafc;
+      border: 1px solid #e2e8f0;
+      border-radius: 6px;
+      padding: 10px;
+    }
+    .stat div:first-child {
+      color: #64748b;
+      font-size: 12px;
+    }
+    .stat div:last-child {
+      margin-top: 3px;
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+    }
+    #plot {
+      width: 100%;
+      height: 720px;
+    }
+    .notes {
+      color: #334155;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>How High-Amplitude Outliers Create a Widening Rolling RMS Pattern</h1>
+    <p class="subtitle">
+      This is a small synthetic example. The baseline vibration stays constant. Only the number of sparse
+      high-amplitude outliers changes. As the outlier population increases, rolling RMS develops large peaks
+      at increasingly separated outlier clusters.
+    </p>
+
+    <section class="panel">
+      <div class="formula">
+        RMS_window = sqrt((sum(clean_samples^2) + sum(outlier_samples^2)) / N)<br>
+        Approximation used here: RMS_window = sqrt((N * baseline_rms^2 + k_outliers * A_outlier^2) / N)<br>
+        Winsorized version: RMS_window = sqrt((N * baseline_rms^2 + k_outliers * min(A_outlier, cap)^2) / N)
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="controls">
+        <label for="populationSlider"><strong>Outlier population</strong></label>
+        <input id="populationSlider" type="range" min="0" max="100" value="0" step="1">
+        <span id="populationValue">0%</span>
+        <button id="playButton" type="button">Play</button>
+      </div>
+      <div id="stats">
+        <div class="stat"><div>Baseline RMS</div><div id="baselineStat">50.0</div></div>
+        <div class="stat"><div>Max outliers/window</div><div id="outlierStat">0</div></div>
+        <div class="stat"><div>Max raw RMS</div><div id="rawStat">50.0</div></div>
+        <div class="stat"><div>Max winsorized RMS</div><div id="winStat">50.0</div></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div id="plot"></div>
+    </section>
+
+    <section class="panel notes">
+      <strong>Interpretation:</strong>
+      The top plot shows rolling RMS. The black line is the outlier-contaminated RMS. The purple line is
+      what happens when those outliers are capped. The lower plot shows how many outliers landed in each
+      rolling window. The widening is not caused by the baseline vibration changing; it is caused by the
+      timing/count of sparse large samples.
+    </section>
+  </main>
+
+  <script>
+    const minutes = [];
+    const baseline = [];
+    const centers = [4.0, 6.7, 9.9, 13.8, 18.5, 24.3, 31.2, 39.4, 49.0, 59.8];
+    const nWindows = 241;
+    const durationMin = 62.0;
+    const samplesPerWindow = 5000;
+    const baselineRms = 50.0;
+    const outlierAmplitude = 1800.0;
+    const winsorCap = 180.0;
+
+    for (let i = 0; i < nWindows; i++) {
+      const t = durationMin * i / (nWindows - 1);
+      minutes.push(t);
+      baseline.push(baselineRms);
+    }
+
+    function gaussian(x, mu, sigma) {
+      const z = (x - mu) / sigma;
+      return Math.exp(-0.5 * z * z);
+    }
+
+    function deterministicRipple(i) {
+      return 0.5 + 0.5 * Math.sin(i * 12.9898 + 78.233);
+    }
+
+    function outlierCountAt(t, i, population) {
+      let envelope = 0;
+      for (let j = 0; j < centers.length; j++) {
+        const width = 0.20 + 0.025 * j;
+        const amplitude = 2.0 + 0.75 * j;
+        envelope += amplitude * gaussian(t, centers[j], width);
+      }
+      const background = 0.15 + 0.10 * Math.sin(0.65 * t);
+      const rawCount = population * (background + envelope) + population * 0.45 * deterministicRipple(i);
+      return Math.max(0, Math.round(rawCount));
+    }
+
+    function compute(populationPercent) {
+      const population = populationPercent / 100.0;
+      const rawRms = [];
+      const cappedRms = [];
+      const outlierCounts = [];
+      let maxOutliers = 0;
+      let maxRaw = baselineRms;
+      let maxWin = baselineRms;
+
+      for (let i = 0; i < minutes.length; i++) {
+        const k = outlierCountAt(minutes[i], i, population);
+        outlierCounts.push(k);
+        maxOutliers = Math.max(maxOutliers, k);
+        const raw = Math.sqrt((samplesPerWindow * baselineRms * baselineRms + k * outlierAmplitude * outlierAmplitude) / samplesPerWindow);
+        const capped = Math.sqrt((samplesPerWindow * baselineRms * baselineRms + k * winsorCap * winsorCap) / samplesPerWindow);
+        rawRms.push(raw);
+        cappedRms.push(capped);
+        maxRaw = Math.max(maxRaw, raw);
+        maxWin = Math.max(maxWin, capped);
+      }
+      return {rawRms, cappedRms, outlierCounts, maxOutliers, maxRaw, maxWin};
+    }
+
+    function render(populationPercent) {
+      const result = compute(populationPercent);
+      document.getElementById("populationValue").textContent = populationPercent + "%";
+      document.getElementById("baselineStat").textContent = baselineRms.toFixed(1);
+      document.getElementById("outlierStat").textContent = result.maxOutliers.toString();
+      document.getElementById("rawStat").textContent = result.maxRaw.toFixed(1);
+      document.getElementById("winStat").textContent = result.maxWin.toFixed(1);
+
+      const traces = [
+        {
+          x: minutes,
+          y: result.rawRms,
+          name: "Raw rolling RMS with outliers",
+          type: "scatter",
+          mode: "lines",
+          line: {color: "black", width: 2},
+          xaxis: "x",
+          yaxis: "y"
+        },
+        {
+          x: minutes,
+          y: result.cappedRms,
+          name: "Winsorized/capped RMS",
+          type: "scatter",
+          mode: "lines",
+          line: {color: "#7c3aed", width: 2},
+          xaxis: "x",
+          yaxis: "y"
+        },
+        {
+          x: minutes,
+          y: baseline,
+          name: "True unchanged baseline RMS",
+          type: "scatter",
+          mode: "lines",
+          line: {color: "#2563eb", width: 2, dash: "dash"},
+          xaxis: "x",
+          yaxis: "y"
+        },
+        {
+          x: minutes,
+          y: result.outlierCounts,
+          name: "Outliers in window",
+          type: "bar",
+          marker: {color: "rgba(220,38,38,0.55)"},
+          xaxis: "x2",
+          yaxis: "y2"
+        }
+      ];
+
+      const layout = {
+        margin: {l: 70, r: 25, t: 55, b: 60},
+        paper_bgcolor: "white",
+        plot_bgcolor: "white",
+        legend: {orientation: "h", x: 0, y: 1.08},
+        hovermode: "x unified",
+        grid: {rows: 2, columns: 1, pattern: "independent", roworder: "top to bottom"},
+        xaxis: {
+          title: "Time (minutes)",
+          domain: [0, 1],
+          anchor: "y",
+          showgrid: true,
+          gridcolor: "#e5e7eb"
+        },
+        yaxis: {
+          title: "Rolling RMS amplitude",
+          domain: [0.35, 1],
+          showgrid: true,
+          gridcolor: "#e5e7eb"
+        },
+        xaxis2: {
+          title: "Time (minutes)",
+          domain: [0, 1],
+          anchor: "y2",
+          showgrid: true,
+          gridcolor: "#e5e7eb"
+        },
+        yaxis2: {
+          title: "Outlier count",
+          domain: [0, 0.25],
+          rangemode: "tozero",
+          showgrid: true,
+          gridcolor: "#e5e7eb"
+        },
+        annotations: [
+          {
+            text: "A few large samples can dominate RMS because they are squared before averaging.",
+            xref: "paper",
+            yref: "paper",
+            x: 0,
+            y: 1.16,
+            showarrow: false,
+            align: "left",
+            font: {size: 13, color: "#334155"}
+          }
+        ]
+      };
+
+      Plotly.react("plot", traces, layout, {responsive: true, displaylogo: false});
+    }
+
+    const slider = document.getElementById("populationSlider");
+    const playButton = document.getElementById("playButton");
+    let timer = null;
+
+    slider.addEventListener("input", () => render(Number(slider.value)));
+    playButton.addEventListener("click", () => {
+      if (timer !== null) {
+        clearInterval(timer);
+        timer = null;
+        playButton.textContent = "Play";
+        return;
+      }
+      playButton.textContent = "Pause";
+      timer = setInterval(() => {
+        let value = Number(slider.value) + 2;
+        if (value > 100) {
+          value = 0;
+        }
+        slider.value = value;
+        render(value);
+      }, 90);
+    });
+
+    render(0);
+  </script>
+</body>
+</html>
+"""
+
+
+def main() -> None:
+    output = Path("outputs/outlier_population_rms_plotly_demo.html")
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(HTML, encoding="utf-8")
+    print(f"Wrote {output}")
+
+
+if __name__ == "__main__":
+    main()
