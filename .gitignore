@@ -18,14 +18,16 @@ env/
 # Matplotlib local cache
 .matplotlib/
 
-# Raw and derived capture data
+# Raw capture data
 *.dat
 *.npy
 *.npz
-derived_data/
 
-# Generated analysis outputs
-outputs/
+# Tracked derived data and generated analysis outputs
+!derived_data/
+!derived_data/**
+!outputs/
+!outputs/**
 
 # Local logs / scratch
 *.log

@@ -1,0 +1,14 @@
+input=iis3dwb_acc.dat
+samples=82499412
+duration_minutes=51.561488
+sample_rate_hz=26667.000
+offset_bytes=4
+near_clip_threshold=30000
+near_clip_events=21894
+near_clip_by_axis X/Y/Z=7286/7297/7311
+worst_fifo_position=170 count=385
+worst_byte_mod_1536=0 count=343
+worst_byte_mod_512=0 count=1001
+fifo_blocks_with_near_clip=20011
+max_near_clip_events_in_one_fifo_payload=76
+output=outputs/fifo_boundary_diagnostics.png

@@ -1,0 +1,30 @@
+{
+  "input": "iis3dwb_acc.dat",
+  "sample_rate_hz": 26667.0,
+  "offset_bytes": 4,
+  "near_clip_threshold": 30000,
+  "winsorize_threshold": 10000,
+  "original_samples": 82499412,
+  "original_duration_minutes": 51.561487981400234,
+  "contaminated_rows_removed": 20929,
+  "contaminated_rows_percent": 0.02536866565788372,
+  "contaminated_axis_samples_x_y_z": [
+    7286,
+    7297,
+    7311
+  ],
+  "cleaned_removed_samples": 82478483,
+  "cleaned_removed_duration_minutes_if_retimed": 51.54840751990601,
+  "winsorized_axis_samples_clipped_total": 262147,
+  "outputs": {
+    "winsorized_dat": "derived_data/iis3dwb_acc_winsorized.dat",
+    "cleaned_removed_dat": "derived_data/iis3dwb_acc_cleaned_removed.dat",
+    "contamination_mask_npy": "derived_data/iis3dwb_acc_contamination_mask.npy",
+    "metadata_json": "derived_data/iis3dwb_acc_cleaning_metadata.json"
+  },
+  "notes": [
+    "The winsorized .dat preserves the original sample count, timing, header, and trailing bytes.",
+    "The cleaned_removed .dat drops any XYZ row where any axis is near-clipped; use the mask to map back to original time.",
+    "Near-clipped rows are treated as contamination, not vibration."
+  ]
+}
